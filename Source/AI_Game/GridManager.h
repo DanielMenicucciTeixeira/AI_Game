@@ -126,6 +126,9 @@ public:
 	UFUNCTION(BlueprintCallable)
 		bool SetCellColor(int32 index, FColor color);
 
+	UFUNCTION(BlueprintCallable)
+		UCell* GetRandomCell();
+
 	// Sets default values for this actor's properties
 	AGridManager();
 

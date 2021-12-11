@@ -6,6 +6,7 @@
 #include "AIController.h"
 #include "AI_GameCharacter.h"
 #include "GridManager.h"
+#include "Components/SphereComponent.h"
 #include "Game_AIController.generated.h"
 
 /**
@@ -16,7 +17,7 @@ enum AIState
 {
 	CHASING			UMETA(DisplayName = "Chasing"),
 	FLEEING			UMETA(DisplayName = "Fleeing"),
-	FOLLOWING_PATH	UMETA(DisplayName = "Following Path"),
+	WANDER			UMETA(DisplayName = "Wandering"),
 	LAST			UMETA(DisplayName = "LastState")
 };
 
@@ -27,6 +28,9 @@ class AI_GAME_API AGame_AIController : public AAIController
 
 protected:
 	AAI_GameCharacter* Character;
+
+	UPROPERTY(EditAnywhere)
+	USphereComponent* TrackingSphere;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Arrive/Flee");
 	AActor* TargetActor;
@@ -55,19 +59,16 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Arrive/Flee")
 	float SafeFlightDistance = 1000.0f;//How far from the flee target is considered "safe" to stop fleeing.
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Decision")
-	TEnumAsByte<AIState> State = FLEEING;
-
 	UFUNCTION(BlueprintCallable)
 	void SetTargetLocation();
 
 	float RotationRate = 0.0f;
 
 	UFUNCTION(BlueprintCallable)
-	void Chase();
+	void GoToLocation();
 	
 	UFUNCTION(BlueprintCallable)
-	void Flee();
+	void MoveAwayFromLocation();
 
 	UFUNCTION(BlueprintCallable)
 	float LookAt(FVector target);
@@ -82,11 +83,23 @@ protected:
 		void FollowPathToTarget();
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite)
-		float CellReachDistance = 80.0f;
+		float CellReachDistance = 60.0f;
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite)
 		float PathfindMaxMoveAngle = 1.0f;
 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite)
+		float SecondsWandering = 0.0f;
+
 	void Act();
+
+	//Behaviour methods
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Decision")
+		TEnumAsByte<AIState> CurrentState = FLEEING;
+
+	UFUNCTION(BlueprintCallable)
+		TEnumAsByte<AIState> Wander();
+
 
 public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
@@ -94,6 +107,8 @@ public:
 
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaTime) override;
+
+	AGame_AIController();
 
 	//For Testing
 

@@ -439,9 +439,17 @@ bool AGridManager::SetCellColor(int32 index, FColor color)
 		return false;
 	}
 
-	GEngine->AddOnScreenDebugMessage(-1, 15.0f, FColor::Green, FString::Printf(TEXT("Valid index: %f"), index));
+	//GEngine->AddOnScreenDebugMessage(-1, 15.0f, FColor::Green, FString::Printf(TEXT("Valid index: %f"), index));
 	GridCells[index]->Color = color;
 	return true;
+}
+
+UCell* AGridManager::GetRandomCell()
+{
+	UCell* cell;
+	static FRandomStream random;
+	do { cell = GridCells[random.RandRange(0, GridCells.Num() - 1)]; } while (cell->State != ECellState::FREE);
+	return cell;
 }
 
 

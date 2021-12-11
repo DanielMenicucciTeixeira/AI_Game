@@ -36,18 +36,17 @@ float AGame_AIController::LookAt(FVector target)
 
 bool AGame_AIController::FindPath(FVector destination)
 {
-	return GridManager->FindPathByLocation(Path, Character->GetActorLocation(), destination);
-
 	for (auto& cell : Path.CellsInPath)
 	{
 		GridManager->SetCellColor(cell->Index, FColor::Blue);
 	}
+
+	return GridManager->FindPathByLocation(Path, Character->GetActorLocation(), destination);
 }
 
 void AGame_AIController::FollowPathToTarget()
 {
-	SetTargetLocation();
-	if (Path.CellsInPath.Num() == 0) if(!FindPath(TargetLocation)) return;
+	if(Path.CellsInPath.Num() == 0) return;
 
 	float distance = FVector2D::Distance(FVector2D(Path.CellsInPath[0]->Location), FVector2D(Character->GetActorLocation()));
 	while (distance < CellReachDistance)
@@ -69,23 +68,24 @@ void AGame_AIController::FollowPathToTarget()
 
 void AGame_AIController::Act()
 {
-	switch (State)
+	switch (CurrentState)
 	{
 	case CHASING:
-		Chase();
+		GoToLocation();
 		break;
 	case FLEEING:
-		Flee();
+		MoveAwayFromLocation();
 		break;
-	case FOLLOWING_PATH:
-		FollowPathToTarget();
+	case WANDER:
+		CurrentState = Wander();
 		break;
 	}
 }
 
-void AGame_AIController::Chase()
+void AGame_AIController::GoToLocation()
 {
 	SetTargetLocation();
+
 	float angle = LookAt(TargetLocation);
 	float distance = FVector::Distance(Character->GetActorLocation(), TargetLocation);
 
@@ -101,9 +101,10 @@ void AGame_AIController::Chase()
 	}
 }
 
-void AGame_AIController::Flee()
+void AGame_AIController::MoveAwayFromLocation()
 {
 	SetTargetLocation();
+
 	FVector fleeLocation;
 	FVector charLocation = Character->GetActorLocation();
 	fleeLocation = charLocation + ((charLocation - TargetLocation).GetSafeNormal() * SafeFlightDistance);
@@ -124,12 +125,32 @@ void AGame_AIController::Flee()
 	}
 }
 
+TEnumAsByte<AIState> AGame_AIController::Wander()
+{
+	if (SecondsWandering <= 0 || Path.CellsInPath.Num() <= 0)
+	{
+		FindPath(TargetLocation);
+		TargetLocation = GridManager->GetRandomCell()->Location;
+		SecondsWandering = 5.0f;
+	}
+	else SecondsWandering -= GetWorld()->GetDeltaSeconds();
+
+	FollowPathToTarget();
+	GEngine->AddOnScreenDebugMessage(-1, 0, FColor::Orange, FString::Printf(TEXT("State number: %f"), SecondsWandering));
+	return WANDER;
+}
+
 void AGame_AIController::BeginPlay()
 {
 	Super::BeginPlay();
 
 	Character = Cast<AAI_GameCharacter>(GetPawn());
 	if (!Character) GEngine->AddOnScreenDebugMessage(-1, 15.0f, FColor::Red, TEXT("Failed to find suitable pawn!"));
+
+	FAttachmentTransformRules transformRules(EAttachmentRule::SnapToTarget, false);
+	AttachToActor(Character, transformRules);
+
+	TrackingSphere->AttachTo(GetRootComponent(), NAME_None, EAttachLocation::SnapToTarget);
 }
 
 void AGame_AIController::Tick(float DeltaTime)
@@ -137,15 +158,26 @@ void AGame_AIController::Tick(float DeltaTime)
 	Super::Tick(DeltaTime);
 	RotationRate = 0.0f;
 
+	GEngine->AddOnScreenDebugMessage(-1, 0, FColor::Orange, FString::Printf(TEXT("State number: %d"), CurrentState.GetValue()));
+	GEngine->AddOnScreenDebugMessage(-1, 0, FColor::Orange, TargetLocation.ToString());
+
+
 	if (!TargetActor) TargetActor = GetWorld()->GetFirstPlayerController()->GetPawn();
 	Act();
 	Character->SetActorRotation(Character->GetActorRotation() + FRotator(0.0f, FMath::Clamp(RotationRate, -1.0f, 1.0f) * Character->BaseTurnRate * DeltaTime, 0.0f));
 }
 
+AGame_AIController::AGame_AIController() : AAIController()
+{
+	TrackingSphere = CreateDefaultSubobject<USphereComponent>(TEXT("Tracking Sphere"));
+	TrackingSphere->SetVisibility(true);
+	TrackingSphere->SetHiddenInGame(false);
+}
+
 TEnumAsByte<AIState> AGame_AIController::ToggleState()
 {
-	State = TEnumAsByte<AIState>(State + 1);
-	if(State == LAST) State = TEnumAsByte<AIState>(0);
+	CurrentState = TEnumAsByte<AIState>(CurrentState + 1);
+	if(CurrentState == LAST) CurrentState = TEnumAsByte<AIState>(0);
 
-	return State;
+	return CurrentState;
 }

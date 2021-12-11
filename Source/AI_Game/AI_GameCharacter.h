@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
+#include "Perception/AIPerceptionComponent.h"
 #include "AI_GameCharacter.generated.h"
 
 UCLASS(config=Game)
