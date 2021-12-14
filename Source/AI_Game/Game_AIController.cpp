@@ -345,10 +345,6 @@ void AGame_AIController::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 	RotationRate = 0.0f;
-	for (const auto& enemy : NearbyEnemies)
-	{
-		//if (FVector::Distance(enemy->GetActorLocation(), Character->GetActorLocation()) > 1000.0) RemoveNearbyEnemy(enemy);
-	}
 	if (!NearbyEnemies.Contains(TargetEnemy)) TargetEnemy = nullptr;
 	Act();
 	Character->SetActorRotation(Character->GetActorRotation() + FRotator(0.0f, FMath::Clamp(RotationRate, -1.0f, 1.0f) * Character->BaseTurnRate * DeltaTime, 0.0f));
@@ -389,13 +385,7 @@ void AGame_AIController::PrintData()
 		break;
 	}
 
-	GEngine->AddOnScreenDebugMessage(-1, 0.0f, FColor::Red, FString::Printf(TEXT("NearbyEnemies num = %d"), NearbyEnemies.Num()));
-
-	if(TargetEnemy) GEngine->AddOnScreenDebugMessage(-1, 0.0f, FColor::Blue, TargetEnemy->GetName());
-	else GEngine->AddOnScreenDebugMessage(-1, 0.0f, FColor::Blue, TEXT("None"));
-
-	if (TargetPickUp) GEngine->AddOnScreenDebugMessage(-1, 0.0f, FColor::Cyan, TargetPickUp->GetName());
-	else GEngine->AddOnScreenDebugMessage(-1, 0.0f, FColor::Blue, TEXT("None"));
+	GEngine->AddOnScreenDebugMessage(-1, 0.0f, FColor::Red, FString::Printf(TEXT("Ammo = %d"), Character->GetCurrentAmmo()));
 }
 
 TEnumAsByte<AIState> AGame_AIController::ToggleState()
