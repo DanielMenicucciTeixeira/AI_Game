@@ -7,6 +7,7 @@
 #include "AI_GameCharacter.h"
 #include "GridManager.h"
 #include "Components/SphereComponent.h"
+#include "BasePickUp.h"
 #include "Game_AIController.generated.h"
 
 /**
@@ -17,7 +18,9 @@ enum AIState
 {
 	CHASING			UMETA(DisplayName = "Chasing"),
 	FLEEING			UMETA(DisplayName = "Fleeing"),
-	WANDER			UMETA(DisplayName = "Wandering"),
+	WANDERING		UMETA(DisplayName = "Wandering"),
+	ENGAGE_VIOLENCE	UMETA(DisplayName = "Engage Violence"),
+	SEEKING			UMETA(DisplayName = "Seeking"),
 	LAST			UMETA(DisplayName = "LastState")
 };
 
@@ -29,11 +32,11 @@ class AI_GAME_API AGame_AIController : public AAIController
 protected:
 	AAI_GameCharacter* Character;
 
-	UPROPERTY(EditAnywhere)
-	USphereComponent* TrackingSphere;
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Arrive/Flee");
+	ABasePickUp* TargetPickUp;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Arrive/Flee");
-	AActor* TargetActor;
+	AAI_GameCharacter* TargetEnemy;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Arrive/Flee");
 	FVector TargetLocation;
@@ -59,8 +62,14 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Arrive/Flee")
 	float SafeFlightDistance = 1000.0f;//How far from the flee target is considered "safe" to stop fleeing.
 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Fire")
+		float MissAngleRange = 0.349066;//In Radians
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Fire")
+		float Accuracy = 0.5f;//Between 0 and 1
+
 	UFUNCTION(BlueprintCallable)
-	void SetTargetLocation();
+		float GetMissAngle();
 
 	float RotationRate = 0.0f;
 
@@ -83,14 +92,29 @@ protected:
 		void FollowPathToTarget();
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite)
-		float CellReachDistance = 60.0f;
+		float CellReachDistance = 80.0f;
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite)
 		float PathfindMaxMoveAngle = 1.0f;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite)
-		float SecondsWandering = 0.0f;
+		float SecondsWandering = 10.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite)
+		float SecondsFleeing = 2.0f;
 
 	void Act();
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Decision")
+		TSet<AAI_GameCharacter*> NearbyEnemies;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Decision")
+		float NearbyEnemyRange = 10000;
+
+	UFUNCTION(BlueprintCallable)
+		AActor* FindClosestActor(TArray<AActor*>& actors);
+
+	UFUNCTION(BlueprintCallable)
+		AAI_GameCharacter* FindClosestEnemy(TSet<AAI_GameCharacter*>& enemies);
 
 	//Behaviour methods
 
@@ -99,7 +123,21 @@ protected:
 
 	UFUNCTION(BlueprintCallable)
 		TEnumAsByte<AIState> Wander();
+	
+	UFUNCTION(BlueprintCallable)
+		TEnumAsByte<AIState> Chase();
 
+	UFUNCTION(BlueprintCallable)
+		TEnumAsByte<AIState> Flee();
+
+	UFUNCTION(BlueprintCallable)
+		TEnumAsByte<AIState> Fire();
+
+	UFUNCTION(BlueprintCallable)
+		TEnumAsByte<AIState> Seek();
+
+	UFUNCTION(BlueprintCallable)
+		TEnumAsByte<AIState> HasEnemyInSight();
 
 public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
@@ -108,7 +146,13 @@ public:
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaTime) override;
 
-	AGame_AIController();
+	UFUNCTION(BlueprintCallable)
+	void AddNearbyEnemy(AAI_GameCharacter* enemy);
+
+	UFUNCTION(BlueprintCallable)
+	void RemoveNearbyEnemy(AAI_GameCharacter* enemy);
+
+	void PrintData();
 
 	//For Testing
 

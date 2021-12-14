@@ -8,6 +8,9 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/Controller.h"
 #include "GameFramework/SpringArmComponent.h"
+#include "DrawDebugHelpers.h"
+
+#define COLLISION_WEAPON ECC_GameTraceChannel1
 
 //////////////////////////////////////////////////////////////////////////
 // AAI_GameCharacter
@@ -15,6 +18,8 @@
 AAI_GameCharacter::AAI_GameCharacter()
 {
 	RootComponent = CharacterRoot;
+	GunStartPosition = CreateDefaultSubobject<USceneComponent>(TEXT("Gun Position"));
+	WeaponHitbox = CreateDefaultSubobject<UCapsuleComponent>(TEXT("Weapon Hitbox"));
 
 	// Set size for collision capsule
 	GetCapsuleComponent()->InitCapsuleSize(42.f, 96.0f);
@@ -111,6 +116,54 @@ void AAI_GameCharacter::LookUpAtRate(float Rate)
 {
 	// calculate delta for this frame from the rate information
 	AddControllerPitchInput(Rate * BaseLookUpRate * GetWorld()->GetDeltaSeconds());
+}
+
+void AAI_GameCharacter::AddHP(int hp)
+{
+	CurrentHP += hp;
+	if (CurrentHP >= LowHealthThreshold) LowHealth = false;
+	if (CurrentHP > MaxHP) CurrentHP = MaxHP;
+}
+
+void AAI_GameCharacter::DealDamage(int damage)
+{
+	CurrentHP -= damage;
+	if (CurrentHP <= LowHealthThreshold) LowHealth = true;
+	if (CurrentHP <= 0) Destroy();
+}
+
+void AAI_GameCharacter::AddAmmo(int ammo)
+{
+	CurrentAmmo += ammo;
+	if (CurrentAmmo > MaxAmmo) CurrentAmmo = MaxAmmo;
+}
+
+bool AAI_GameCharacter::Fire()
+{
+	if (GetWorld()->GetTimeSeconds() - LastFireTime < FireDealy) return false;
+	if (CurrentAmmo <= 0) return false;
+
+	CurrentAmmo--;
+	LastFireTime = GetWorld()->GetTimeSeconds();
+	FHitResult outHitResult;
+	FCollisionQueryParams params;
+	params.AddIgnoredActor(this);
+
+	DrawDebugLine
+	(
+		GetWorld(),
+		GetActorLocation() + GetActorForwardVector() * FireRange + FVector(0.0f, 0.0f, 16.0f),
+		(GetActorForwardVector() * WeaponRange) + GetActorLocation() + GetActorForwardVector() * FireRange + FVector(0.0f, 0.0f, 16.0f),
+		FColor(255, 0, 0),
+		false, 0.3f, 10,
+		12.333 
+	);
+	if (GetWorld()->LineTraceSingleByChannel(outHitResult, GetActorLocation() + GetActorForwardVector() * FireRange + FVector(0.0f, 0.0f, 16.0f), (GetActorForwardVector() * WeaponRange) + GetActorLocation() + GetActorForwardVector() * FireRange + FVector(0.0f, 0.0f, 16.0f), COLLISION_WEAPON, params))
+	{
+		if (Cast<AAI_GameCharacter>(outHitResult.Actor)) Cast<AAI_GameCharacter>(outHitResult.Actor)->DealDamage(WeaponDamage);
+		return true;
+	}
+	else return false;
 }
 
 void AAI_GameCharacter::MoveForward(float Value)

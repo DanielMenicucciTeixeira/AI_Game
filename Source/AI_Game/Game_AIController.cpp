@@ -4,11 +4,11 @@
 #include "Game_AIController.h"
 #include "Kismet/KismetMathLibrary.h"
 #include "Cell.h"
+#include "Components/CapsuleComponent.h"
+#include "Kismet/GameplayStatics.h"
 
-void AGame_AIController::SetTargetLocation()
-{
-	if (TargetActor) TargetLocation = TargetActor->GetActorLocation();
-}
+#define VERY_BIG 999999999.9f
+#define SMALL 100.0f
 
 float AGame_AIController::LookAt(FVector target)
 {
@@ -71,21 +71,31 @@ void AGame_AIController::Act()
 	switch (CurrentState)
 	{
 	case CHASING:
-		GoToLocation();
+		CurrentState = Chase();
 		break;
 	case FLEEING:
-		MoveAwayFromLocation();
+		CurrentState = Flee();
 		break;
-	case WANDER:
+	case WANDERING:
 		CurrentState = Wander();
+		break;
+	case ENGAGE_VIOLENCE:
+		CurrentState = Fire();
+		break;
+	case SEEKING:
+		CurrentState = Seek();
 		break;
 	}
 }
 
+float AGame_AIController::GetMissAngle()
+{
+	static FRandomStream random;
+	return FMath::Max(0.0f, random.FRandRange(0.0f, MissAngleRange) - MissAngleRange * Accuracy);
+}
+
 void AGame_AIController::GoToLocation()
 {
-	SetTargetLocation();
-
 	float angle = LookAt(TargetLocation);
 	float distance = FVector::Distance(Character->GetActorLocation(), TargetLocation);
 
@@ -103,8 +113,6 @@ void AGame_AIController::GoToLocation()
 
 void AGame_AIController::MoveAwayFromLocation()
 {
-	SetTargetLocation();
-
 	FVector fleeLocation;
 	FVector charLocation = Character->GetActorLocation();
 	fleeLocation = charLocation + ((charLocation - TargetLocation).GetSafeNormal() * SafeFlightDistance);
@@ -125,8 +133,75 @@ void AGame_AIController::MoveAwayFromLocation()
 	}
 }
 
+AActor* AGame_AIController::FindClosestActor(TArray<AActor*>& actors)
+{
+	AActor* closest = actors[0];
+	float closestDistance = FVector::Distance(Character->GetActorLocation(), closest->GetActorLocation());
+	float tempDistance;
+	for (const auto& actor : actors)
+	{
+		tempDistance = FVector::Distance(Character->GetActorLocation(), actor->GetActorLocation());
+		if (tempDistance < closestDistance)
+		{
+			closest = actor;
+			closestDistance = tempDistance;
+		}
+	}
+
+	return closest;
+}
+
+AAI_GameCharacter* AGame_AIController::FindClosestEnemy(TSet<AAI_GameCharacter*>& enemies)
+{
+	if (NearbyEnemies.Num() <= 0) return nullptr;
+	AAI_GameCharacter* closest = nullptr;
+	for (const auto& first : enemies) { closest = first; break; }
+	float closestDistance = FVector::Distance(Character->GetActorLocation(), closest->GetActorLocation());
+	float tempDistance;
+	for (const auto& enemy : enemies)
+	{
+		tempDistance = FVector::Distance(Character->GetActorLocation(), enemy->GetActorLocation());
+		if (tempDistance < closestDistance)
+		{
+			closest = enemy;
+			closestDistance = tempDistance;
+		}
+	}
+
+	return closest;
+}
+
 TEnumAsByte<AIState> AGame_AIController::Wander()
 {
+	static FRandomStream random;
+
+	if (NearbyEnemies.Num() > 0)
+	{
+		return HasEnemyInSight();
+	}
+	else if (random.RandRange(0, Character->GetMaxHp()) > Character->GetCurrentHp())
+	{
+		TArray<AActor*> pickUps;
+		UGameplayStatics::GetAllActorsWithTag(GetWorld(), "HealthPickUp", pickUps);
+		if (pickUps.Num() > 0)
+		{
+			TargetPickUp = Cast<ABasePickUp>(FindClosestActor(pickUps));
+			FindPath(TargetPickUp->GetActorLocation());
+			return SEEKING;
+		}
+	}
+	else if(Character->GetCurrentAmmo() <= 0)
+	{
+		TArray<AActor*> pickUps;
+		UGameplayStatics::GetAllActorsWithTag(GetWorld(), "AmmoPickUp", pickUps);
+		if (pickUps.Num() > 0)
+		{
+			TargetPickUp = Cast<ABasePickUp>(FindClosestActor(pickUps));
+			FindPath(TargetPickUp->GetActorLocation());
+			return SEEKING;
+		}
+	}
+
 	if (SecondsWandering <= 0 || Path.CellsInPath.Num() <= 0)
 	{
 		FindPath(TargetLocation);
@@ -136,8 +211,123 @@ TEnumAsByte<AIState> AGame_AIController::Wander()
 	else SecondsWandering -= GetWorld()->GetDeltaSeconds();
 
 	FollowPathToTarget();
-	GEngine->AddOnScreenDebugMessage(-1, 0, FColor::Orange, FString::Printf(TEXT("State number: %f"), SecondsWandering));
-	return WANDER;
+	return WANDERING;
+}
+
+TEnumAsByte<AIState> AGame_AIController::Chase()
+{
+	if (NearbyEnemies.Num() <= 0 || Character->GetCurrentAmmo() <= 0) return WANDERING;
+	if (!TargetEnemy) TargetEnemy = FindClosestEnemy(NearbyEnemies);
+
+	if (FVector::Distance(Character->GetActorLocation(), TargetEnemy->GetActorLocation()) > Character->GetWeaponRange())
+	{
+		FHitResult outHitResult;
+		FCollisionObjectQueryParams objectQuerry;
+		FCollisionQueryParams collisionParams;
+		if (GetWorld()->LineTraceSingleByObjectType(outHitResult, Character->GetActorLocation() + Character->GetActorForwardVector() * VERY_BIG + FVector(0.0f, 0.0f, 16.0f), (Character->GetActorForwardVector() * VERY_BIG) + Character->GetActorLocation() + Character->GetActorForwardVector() * VERY_BIG + FVector(0.0f, 0.0f, 16.0f), objectQuerry, collisionParams))
+		{
+			TargetLocation = TargetEnemy->GetActorLocation();
+			GoToLocation();
+		}
+		else
+		{
+			FindPath(TargetEnemy->GetActorLocation());
+			FollowPathToTarget();
+		}
+		return CHASING;
+	}
+	else return ENGAGE_VIOLENCE;
+}
+
+TEnumAsByte<AIState> AGame_AIController::Flee()
+{
+	static float flightTime = 0.0f;
+
+	if (NearbyEnemies.Num() <= 0)
+	{
+		if (flightTime >= SecondsFleeing)
+		{
+			flightTime = 0.0f;
+			return WANDERING;
+		}
+		else
+		{
+			flightTime += GetWorld()->GetDeltaSeconds();
+			return FLEEING;
+		}
+	}
+
+	if (!TargetEnemy) TargetEnemy = FindClosestEnemy(NearbyEnemies);
+	
+	FVector averageEnemyLocation = FVector(0.0f);
+	for (const auto& enemy : NearbyEnemies)
+	{
+		averageEnemyLocation += enemy->GetActorLocation();
+	}
+	averageEnemyLocation /= NearbyEnemies.Num();
+	TargetLocation = (Character->GetActorLocation() - averageEnemyLocation).GetSafeNormal() * SafeFlightDistance;
+
+	FHitResult outHitResult;
+	FCollisionObjectQueryParams objectQuerry;
+	FCollisionQueryParams collisionParams;
+	if (GetWorld()->LineTraceSingleByObjectType(outHitResult, Character->GetActorLocation() + Character->GetActorForwardVector() * SMALL + FVector(0.0f, 0.0f, 16.0f), (Character->GetActorForwardVector() * SMALL) + Character->GetActorLocation() + Character->GetActorForwardVector() * SMALL + FVector(0.0f, 0.0f, 16.0f), objectQuerry, collisionParams))
+	{
+		MoveAwayFromLocation();
+	}
+	else
+	{
+		FindPath(TargetLocation);
+		FollowPathToTarget();
+	}
+	return FLEEING;
+}
+
+TEnumAsByte<AIState> AGame_AIController::Fire()
+{
+	if (NearbyEnemies.Num() < 0 || Character->GetCurrentAmmo() <= 0) return WANDERING;
+
+	if (!TargetEnemy) TargetEnemy = FindClosestEnemy(NearbyEnemies);
+	if (!TargetEnemy) return WANDERING;
+
+	if (FVector::Distance(Character->GetActorLocation(), TargetEnemy->GetActorLocation()) > Character->GetWeaponRange()) return CHASING;
+
+	float angle = LookAt(TargetEnemy->GetActorLocation());
+	if (tan(abs(angle)) * FVector::Distance(Character->GetActorLocation(), TargetEnemy->GetActorLocation()) <= Character->GetWeaponHitbox()->GetScaledCapsuleRadius() + GetMissAngle())
+	{
+		Character->Fire();
+	}
+	return ENGAGE_VIOLENCE;
+}
+
+TEnumAsByte<AIState> AGame_AIController::Seek()
+{
+	if(NearbyEnemies.Num() > 0) return HasEnemyInSight();
+	
+	if (!TargetPickUp || !TargetPickUp->ValidPickUp)
+	{
+		return WANDERING;
+	}
+
+	if (true)//Path.CellsInPath.Num() <= 0)
+	{
+		TargetLocation = TargetPickUp->GetActorLocation();
+		GoToLocation();
+	}
+	else FollowPathToTarget();
+
+	return SEEKING;
+}
+
+TEnumAsByte<AIState> AGame_AIController::HasEnemyInSight()
+{
+	if (Character->GetCurrentAmmo() <= 0) return FLEEING;
+	for (const auto& enemy : NearbyEnemies)
+	{
+		if (Character->LowHealth && !enemy->LowHealth) return FLEEING;
+		else if (!TargetEnemy) TargetEnemy = FindClosestEnemy(NearbyEnemies);
+	}
+	if (TargetEnemy && FVector::Distance(TargetEnemy->GetActorLocation(), Character->GetActorLocation()) <= Character->GetWeaponRange()) return ENGAGE_VIOLENCE;
+	else return CHASING;
 }
 
 void AGame_AIController::BeginPlay()
@@ -149,29 +339,60 @@ void AGame_AIController::BeginPlay()
 
 	FAttachmentTransformRules transformRules(EAttachmentRule::SnapToTarget, false);
 	AttachToActor(Character, transformRules);
-
-	TrackingSphere->AttachTo(GetRootComponent(), NAME_None, EAttachLocation::SnapToTarget);
 }
 
 void AGame_AIController::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 	RotationRate = 0.0f;
-
-	GEngine->AddOnScreenDebugMessage(-1, 0, FColor::Orange, FString::Printf(TEXT("State number: %d"), CurrentState.GetValue()));
-	GEngine->AddOnScreenDebugMessage(-1, 0, FColor::Orange, TargetLocation.ToString());
-
-
-	if (!TargetActor) TargetActor = GetWorld()->GetFirstPlayerController()->GetPawn();
+	for (const auto& enemy : NearbyEnemies)
+	{
+		if (FVector::Distance(enemy->GetActorLocation(), Character->GetActorLocation()) > 1000.0) RemoveNearbyEnemy(enemy);
+	}
+	if (!NearbyEnemies.Contains(TargetEnemy)) TargetEnemy = nullptr;
 	Act();
 	Character->SetActorRotation(Character->GetActorRotation() + FRotator(0.0f, FMath::Clamp(RotationRate, -1.0f, 1.0f) * Character->BaseTurnRate * DeltaTime, 0.0f));
+	PrintData();
 }
 
-AGame_AIController::AGame_AIController() : AAIController()
+void AGame_AIController::AddNearbyEnemy(AAI_GameCharacter* enemy)
 {
-	TrackingSphere = CreateDefaultSubobject<USphereComponent>(TEXT("Tracking Sphere"));
-	TrackingSphere->SetVisibility(true);
-	TrackingSphere->SetHiddenInGame(false);
+	if (!enemy) return;
+	if(enemy != Character) NearbyEnemies.Add(enemy);
+}
+
+void AGame_AIController::RemoveNearbyEnemy(AAI_GameCharacter* enemy)
+{
+	if (!enemy) return;
+	if (enemy != Character) NearbyEnemies.Remove(enemy);
+}
+
+void AGame_AIController::PrintData()
+{
+	switch (CurrentState)
+	{
+	case CHASING:
+		GEngine->AddOnScreenDebugMessage(-1, 0.0f, FColor(255, 192, 203), TEXT("CHASING"));
+		break;
+	case FLEEING:
+		GEngine->AddOnScreenDebugMessage(-1, 0.0f, FColor(255, 192, 203), TEXT("FlEEING"));
+		break;
+	case WANDERING:
+		GEngine->AddOnScreenDebugMessage(-1, 0.0f, FColor(255, 192, 203), TEXT("WANDERING"));
+		break;
+	case ENGAGE_VIOLENCE:
+		GEngine->AddOnScreenDebugMessage(-1, 0.0f, FColor(255, 192, 203), TEXT("ENGAGE_VIOLENCE"));
+		break;
+	case SEEKING:
+		GEngine->AddOnScreenDebugMessage(-1, 0.0f, FColor(255, 192, 203), TEXT("SEEKING"));
+		break;
+	}
+
+	if(TargetEnemy) GEngine->AddOnScreenDebugMessage(-1, 0.0f, FColor::Blue, TargetEnemy->GetName());
+	else GEngine->AddOnScreenDebugMessage(-1, 0.0f, FColor::Blue, TEXT("None"));
+
+	if (TargetPickUp) GEngine->AddOnScreenDebugMessage(-1, 0.0f, FColor::Cyan, TargetPickUp->GetName());
+	else GEngine->AddOnScreenDebugMessage(-1, 0.0f, FColor::Blue, TEXT("None"));
 }
 
 TEnumAsByte<AIState> AGame_AIController::ToggleState()
