@@ -54,7 +54,7 @@ protected:
 	float SlowDownDistance = 500.0f;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Arrive/Flee")
-	float StopDistance = 100.0f;
+	float StopDistance = 0.0f;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Arrive/Flee")
 	float MaxMoveAngle = 0.5;//The maximum absolute angle between the character and the target in which it's still efficient to move forward
@@ -119,7 +119,7 @@ protected:
 	//Behaviour methods
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Decision")
-		TEnumAsByte<AIState> CurrentState = FLEEING;
+		TEnumAsByte<AIState> CurrentState = WANDERING;
 
 	UFUNCTION(BlueprintCallable)
 		TEnumAsByte<AIState> Wander();
